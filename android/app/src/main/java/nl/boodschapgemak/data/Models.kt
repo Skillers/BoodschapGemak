@@ -7,6 +7,8 @@ data class ShoppingItem(
     val id: Int,
     val name: String,
     val quantity: String? = null,
+    /** The dish this was added for, if it came from one. */
+    val dish: String? = null,
     val isChecked: Boolean = false,
     val addedBy: String = "",
     val checkedBy: String? = null,
@@ -74,6 +76,8 @@ data class NewItemBody(val name: String, val quantity: String? = null, val added
 data class ItemPatchBody(
     val name: String? = null,
     val quantity: String? = null,
+    /** The dish this was added for, if it came from one. */
+    val dish: String? = null,
     val isChecked: Boolean? = null,
     val by: String? = null,
     /** A name takes the claim, "" releases it. */
@@ -95,4 +99,16 @@ data class RecipeBody(
     val notes: String? = null,
     val plannedFor: String? = null,
     val ingredients: List<IngredientBody> = emptyList(),
+)
+
+// --- adding a whole dish at once ------------------------------------------
+
+@Serializable
+data class DishIngredientBody(val name: String, val quantity: String? = null)
+
+@Serializable
+data class DishBody(
+    val dish: String,
+    val addedBy: String = "",
+    val ingredients: List<DishIngredientBody> = emptyList(),
 )

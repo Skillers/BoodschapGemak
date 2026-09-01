@@ -230,6 +230,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         items.value = it.getItems()
     }
 
+    /**
+     * Puts a whole dish on the list. Every ingredient becomes an ordinary row
+     * carrying the dish name, so the list says why each thing is on it.
+     */
+    fun addDish(dish: String, ingredients: List<DishIngredientBody>) = call {
+        it.addDish(DishBody(dish.trim(), settings.userName, ingredients))
+        items.value = it.getItems()
+    }
+
     // --- running total ----------------------------------------------------
 
     fun addAmount(amountCents: Int, note: String) = call {

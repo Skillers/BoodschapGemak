@@ -10,17 +10,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -38,8 +43,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import nl.boodschapgemak.data.AppViewModel
+import nl.boodschapgemak.data.DishIngredientBody
 import nl.boodschapgemak.data.ShoppingItem
 import nl.boodschapgemak.data.Trip
 
@@ -48,7 +56,9 @@ fun ShoppingListScreen(vm: AppViewModel) {
     val items by vm.items.collectAsStateWithLifecycle()
     val trip by vm.trip.collectAsStateWithLifecycle()
     val me = vm.settings.userName
+
     var editing by remember { mutableStateOf<ShoppingItem?>(null) }
+    var addingDish by remember { mutableStateOf(false) }
 
     val todo = items.filterNot { it.isChecked }
     val done = items.filter { it.isChecked }
@@ -56,51 +66,67 @@ fun ShoppingListScreen(vm: AppViewModel) {
     Column(Modifier.fillMaxSize()) {
         RunningTotal(trip = trip, onAdd = vm::addAmount)
         AddItemRow(onAdd = vm::addItem)
+
+        Row(Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 4.dp)) {
+            TextButton(onClick = { addingDish = true }) {
+                Icon(Icons.Outlined.Add, contentDescription = null)
+                Text("Gerecht toevoegen", Modifier.padding(start = 8.dp))
+            }
+        }
         HorizontalDivider()
 
         if (items.isEmpty()) {
             EmptyHint("De lijst is leeg. Typ hierboven wat er mee moet.")
-            return@Column
-        }
-
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(todo, key = { "item-" + it.id }) { item ->
-                ShoppingRow(
-                    item = item,
-                    me = me,
-                    onToggle = { vm.setChecked(item, true) },
-                    onClaim = { vm.toggleClaim(item) },
-                    onLongPress = { editing = item },
-                )
-                HorizontalDivider()
-            }
-
-            // Ticked items sit down here in their own block, out of the way of
-            // what still has to be found. They leave when the trip is closed.
-            if (done.isNotEmpty()) {
-                item(key = "done-header") {
-                    Text(
-                        text = "In de kar (" + done.size + ")",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp),
-                    )
-                    HorizontalDivider()
-                }
-                items(done, key = { "item-" + it.id }) { item ->
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(todo, key = { "item-" + it.id }) { item ->
                     ShoppingRow(
                         item = item,
                         me = me,
-                        onToggle = { vm.setChecked(item, false) },
+                        onToggle = { vm.setChecked(item, true) },
                         onClaim = { vm.toggleClaim(item) },
                         onLongPress = { editing = item },
                     )
                     HorizontalDivider()
                 }
+
+                // Ticked items sit down here in their own block, out of the way
+                // of what still has to be found. They leave when the trip closes.
+                if (done.isNotEmpty()) {
+                    item(key = "done-header") {
+                        Text(
+                            text = "In de kar (" + done.size + ")",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp),
+                        )
+                        HorizontalDivider()
+                    }
+                    items(done, key = { "item-" + it.id }) { item ->
+                        ShoppingRow(
+                            item = item,
+                            me = me,
+                            onToggle = { vm.setChecked(item, false) },
+                            onClaim = { vm.toggleClaim(item) },
+                            onLongPress = { editing = item },
+                        )
+                        HorizontalDivider()
+                    }
+                }
             }
         }
+    }
+
+    if (addingDish) {
+        DishDialog(
+            onDismiss = { addingDish = false },
+            onSave = { dish, ingredients ->
+                vm.addDish(dish, ingredients)
+                addingDish = false
+            },
+        )
     }
 
     editing?.let { item ->
@@ -186,7 +212,7 @@ private fun AddItemRow(onAdd: (String, String) -> Unit) {
     }
 
     Row(
-        Modifier.fillMaxWidth().padding(12.dp),
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -206,6 +232,93 @@ private fun AddItemRow(onAdd: (String, String) -> Unit) {
         )
         FilledIconButton(onClick = ::submit, enabled = name.isNotBlank()) {
             Icon(Icons.Outlined.Add, contentDescription = "Toevoegen")
+        }
+    }
+}
+
+/**
+ * Name a dish and list what it needs. Every line lands on the shopping list as
+ * an ordinary row carrying the dish name, so mid-shop you can see that the
+ * pesto is there for the pasta and not on its own account.
+ */
+@Composable
+private fun DishDialog(onDismiss: () -> Unit, onSave: (String, List<DishIngredientBody>) -> Unit) {
+    var dish by remember { mutableStateOf("") }
+    var lines by remember { mutableStateOf(listOf("" to "")) }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Gerecht toevoegen", style = MaterialTheme.typography.headlineSmall)
+
+                OutlinedTextField(
+                    value = dish,
+                    onValueChange = { dish = it },
+                    label = { Text("Gerecht") },
+                    supportingText = { Text("Bijvoorbeeld: pasta pesto") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Text("Ingredienten", style = MaterialTheme.typography.titleMedium)
+
+                lines.forEachIndexed { index, line ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedTextField(
+                            value = line.first,
+                            onValueChange = { newName ->
+                                lines = lines.toMutableList().also { it[index] = newName to line.second }
+                            },
+                            label = { Text("Ingredient") },
+                            singleLine = true,
+                            modifier = Modifier.weight(2f),
+                        )
+                        OutlinedTextField(
+                            value = line.second,
+                            onValueChange = { newAmount ->
+                                lines = lines.toMutableList().also { it[index] = line.first to newAmount }
+                            },
+                            label = { Text("Aantal") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            onClick = { lines = lines.filterIndexed { i, _ -> i != index } },
+                            enabled = lines.size > 1,
+                        ) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Regel verwijderen")
+                        }
+                    }
+                }
+
+                TextButton(onClick = { lines = lines + ("" to "") }) {
+                    Icon(Icons.Outlined.Add, contentDescription = null)
+                    Text("Regel toevoegen", Modifier.padding(start = 8.dp))
+                }
+
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Annuleren") }
+                    Button(
+                        enabled = dish.isNotBlank() && lines.any { it.first.isNotBlank() },
+                        onClick = {
+                            val ingredients = lines
+                                .filter { it.first.isNotBlank() }
+                                .map { DishIngredientBody(it.first.trim(), it.second.trim().ifEmpty { null }) }
+                            onSave(dish, ingredients)
+                        },
+                    ) { Text("Op de lijst zetten") }
+                }
+            }
         }
     }
 }
@@ -249,6 +362,7 @@ private fun ShoppingRow(
         supportingContent = {
             val note = listOfNotNull(
                 item.quantity?.takeIf { it.isNotBlank() },
+                item.dish?.takeIf { it.isNotBlank() }?.let { "voor $it" },
                 when {
                     item.isChecked -> item.checkedBy?.takeIf { it.isNotBlank() }?.let { "in de kar door $it" }
                     claimedByMe -> "jij loopt ernaartoe"

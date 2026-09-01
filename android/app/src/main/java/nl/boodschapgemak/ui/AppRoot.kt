@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShoppingCart
@@ -44,7 +43,6 @@ import nl.boodschapgemak.data.LiveStatus
 private enum class Tab(val label: String, val icon: ImageVector) {
     List("Lijst", Icons.Outlined.ShoppingCart),
     Total("Totaal", Icons.Outlined.Payments),
-    Recipes("Recepten", Icons.AutoMirrored.Outlined.MenuBook),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -109,7 +107,6 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
             when (tab) {
                 Tab.List -> ShoppingListScreen(vm)
                 Tab.Total -> TotalScreen(vm)
-                Tab.Recipes -> RecipesScreen(vm)
             }
         }
     }

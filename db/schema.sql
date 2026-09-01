@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS shopping_item (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   name        VARCHAR(200)  NOT NULL,
   quantity    VARCHAR(60)   NULL,
+  -- Which dish this was added for, so the list says why it is there.
+  dish        VARCHAR(120)  NULL,
   is_checked  TINYINT(1)    NOT NULL DEFAULT 0,
   added_by    VARCHAR(50)   NOT NULL DEFAULT '',
   checked_by  VARCHAR(50)   NULL,

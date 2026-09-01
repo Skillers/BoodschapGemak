@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import { query } from '../db.js';
+import { pool, query } from '../db.js';
 import { broadcast } from '../realtime.js';
 
 export const itemsRouter = Router();
 
-const SELECT_COLUMNS = `id, name, quantity, is_checked AS isChecked, added_by AS addedBy,
+const SELECT_COLUMNS = `id, name, quantity, dish, is_checked AS isChecked, added_by AS addedBy,
                         checked_by AS checkedBy, claimed_by AS claimedBy, sort_order AS sortOrder`;
 
 // MySQL hands TINYINT(1) back as 0/1; the app wants a real boolean.
@@ -40,19 +40,53 @@ itemsRouter.post('/', async (req, res) => {
   if (!name) return res.status(400).json({ error: 'name is required' });
 
   const quantity = req.body?.quantity?.trim() || null;
+  const dish = String(req.body?.dish ?? '').trim().slice(0, 120) || null;
   const addedBy = String(req.body?.addedBy ?? '').slice(0, 50);
 
   const [{ next }] = await query(
     'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM shopping_item'
   );
   const result = await query(
-    'INSERT INTO shopping_item (name, quantity, added_by, sort_order) VALUES (?, ?, ?, ?)',
-    [name, quantity, addedBy, next]
+    'INSERT INTO shopping_item (name, quantity, dish, added_by, sort_order) VALUES (?, ?, ?, ?, ?)',
+    [name, quantity, dish, addedBy, next]
   );
 
   const item = await findItem(result.insertId);
   pushItem(item);
   res.status(201).json(item);
+});
+
+/**
+ * Adds a whole dish at once: every ingredient becomes an ordinary list row,
+ * tagged with the dish so the list says why it is there. One request rather
+ * than one per ingredient, so the other phone sees the lot appear together.
+ */
+itemsRouter.post('/dish', async (req, res) => {
+  const dish = String(req.body?.dish ?? '').trim().slice(0, 120);
+  if (!dish) return res.status(400).json({ error: 'dish is required' });
+
+  const ingredients = (Array.isArray(req.body?.ingredients) ? req.body.ingredients : [])
+    .map((i) => ({
+      name: String(i?.name ?? '').trim().slice(0, 200),
+      quantity: String(i?.quantity ?? '').trim().slice(0, 60) || null,
+    }))
+    .filter((i) => i.name);
+  if (!ingredients.length) return res.status(400).json({ error: 'at least one ingredient is required' });
+
+  const addedBy = String(req.body?.addedBy ?? '').slice(0, 50);
+  const [{ next }] = await query(
+    'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM shopping_item'
+  );
+
+  // pool.query, not the prepared-statement helper: bulk "VALUES ?" is a
+  // driver-side expansion that execute() does not do.
+  await pool.query(
+    'INSERT INTO shopping_item (name, quantity, dish, added_by, sort_order) VALUES ?',
+    [ingredients.map((ing, idx) => [ing.name, ing.quantity, dish, addedBy, next + idx])]
+  );
+
+  broadcast('items.reload');
+  res.status(201).json({ dish, added: ingredients.length });
 });
 
 itemsRouter.patch('/:id', async (req, res) => {

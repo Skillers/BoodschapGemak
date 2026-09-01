@@ -75,6 +75,11 @@ class Api(private val baseUrl: String, private val householdKey: String) {
         send(builder("/api/items/clear-checked").post(EMPTY_BODY).build())
     }
 
+    /** Adds every ingredient of a dish to the list in one request. */
+    fun addDish(dish: DishBody) {
+        send(builder("/api/items/dish").post(body(dish, DishBody.serializer())).build())
+    }
+
     // --- running total ----------------------------------------------------
 
     fun getCurrentTrip(): Trip =
