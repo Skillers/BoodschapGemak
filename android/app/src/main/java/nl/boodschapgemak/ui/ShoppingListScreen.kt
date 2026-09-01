@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material3.AlertDialog
@@ -24,6 +25,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,32 +35,28 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import nl.boodschapgemak.data.AppViewModel
 import nl.boodschapgemak.data.ShoppingItem
+import nl.boodschapgemak.data.Trip
 
 @Composable
 fun ShoppingListScreen(vm: AppViewModel) {
     val items by vm.items.collectAsStateWithLifecycle()
+    val trip by vm.trip.collectAsStateWithLifecycle()
     val me = vm.settings.userName
     var editing by remember { mutableStateOf<ShoppingItem?>(null) }
 
+    val todo = items.filterNot { it.isChecked }
+    val done = items.filter { it.isChecked }
+
     Column(Modifier.fillMaxSize()) {
+        RunningTotal(trip = trip, onAdd = vm::addAmount)
         AddItemRow(onAdd = vm::addItem)
         HorizontalDivider()
-
-        if (items.any { it.isChecked }) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = vm::clearChecked) {
-                    Text("Verwijder afgevinkte (" + items.count { it.isChecked } + ")")
-                }
-            }
-        }
 
         if (items.isEmpty()) {
             EmptyHint("De lijst is leeg. Typ hierboven wat er mee moet.")
@@ -66,15 +64,41 @@ fun ShoppingListScreen(vm: AppViewModel) {
         }
 
         LazyColumn(Modifier.fillMaxSize()) {
-            items(items, key = { it.id }) { item ->
+            items(todo, key = { "item-" + it.id }) { item ->
                 ShoppingRow(
                     item = item,
                     me = me,
-                    onToggle = { vm.setChecked(item, !item.isChecked) },
+                    onToggle = { vm.setChecked(item, true) },
                     onClaim = { vm.toggleClaim(item) },
                     onLongPress = { editing = item },
                 )
                 HorizontalDivider()
+            }
+
+            // Ticked items sit down here in their own block, out of the way of
+            // what still has to be found. They leave when the trip is closed.
+            if (done.isNotEmpty()) {
+                item(key = "done-header") {
+                    Text(
+                        text = "In de kar (" + done.size + ")",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp),
+                    )
+                    HorizontalDivider()
+                }
+                items(done, key = { "item-" + it.id }) { item ->
+                    ShoppingRow(
+                        item = item,
+                        me = me,
+                        onToggle = { vm.setChecked(item, false) },
+                        onClaim = { vm.toggleClaim(item) },
+                        onLongPress = { editing = item },
+                    )
+                    HorizontalDivider()
+                }
             }
         }
     }
@@ -92,6 +116,60 @@ fun ShoppingListScreen(vm: AppViewModel) {
                 editing = null
             },
         )
+    }
+}
+
+/**
+ * What this shop has cost so far, and the one field that changes it. Type an
+ * amount, tap +, the number climbs. Deliberately not tied to list items - you
+ * are copying what the shelf label said, not itemising a receipt.
+ */
+@Composable
+private fun RunningTotal(trip: Trip?, onAdd: (Int, String) -> Unit) {
+    var amount by remember { mutableStateOf("") }
+
+    val cents = parseAmountToCents(amount)
+    val valid = cents != null && cents != 0
+
+    fun submit() {
+        val value = cents ?: return
+        onAdd(value, "")
+        amount = ""
+    }
+
+    Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text("Totaal", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    text = formatMoney(trip?.totalCents ?: 0),
+                    style = MaterialTheme.typography.headlineMedium,
+                )
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Bedrag erbij") },
+                    isError = amount.isNotBlank() && !valid,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f),
+                )
+                FilledIconButton(onClick = ::submit, enabled = valid) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Bij het totaal optellen")
+                }
+            }
+        }
     }
 }
 

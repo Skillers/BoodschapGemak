@@ -92,7 +92,6 @@ fun TotalScreen(vm: AppViewModel) {
                 supportingContent = {
                     val note = listOfNotNull(
                         entry.note?.takeIf { it.isNotBlank() },
-                        entry.addedBy.takeIf { it.isNotBlank() },
                     ).joinToString(" - ")
                     if (note.isNotEmpty()) Text(note)
                 },

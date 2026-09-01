@@ -25,14 +25,17 @@ import androidx.compose.ui.unit.dp
 import nl.boodschapgemak.data.AppViewModel
 
 /**
- * First-run configuration: where the API lives, the shared key from the
- * server's .env, and which of the two of you is holding this phone.
+ * First-run configuration. Only two things are asked for: the shared key and
+ * which of the two of you is holding this phone. The server address already
+ * defaults to this household's own machine, so it stays out of the way under
+ * "Geavanceerd" until the day the server actually moves.
  */
 @Composable
 fun SetupScreen(vm: AppViewModel, canCancel: Boolean, onDone: () -> Unit) {
-    var baseUrl by remember { mutableStateOf(vm.settings.baseUrl.ifEmpty { "http://desktop-ctplf50:4000" }) }
+    var baseUrl by remember { mutableStateOf(vm.settings.baseUrl) }
     var householdKey by remember { mutableStateOf(vm.settings.householdKey) }
     var userName by remember { mutableStateOf(vm.settings.userName) }
+    var showAdvanced by remember { mutableStateOf(false) }
 
     val canSave = baseUrl.isNotBlank() && householdKey.isNotBlank() && userName.isNotBlank()
 
@@ -45,26 +48,16 @@ fun SetupScreen(vm: AppViewModel, canCancel: Boolean, onDone: () -> Unit) {
     ) {
         Text("BoodschapGemak", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Vul in waar de server draait. Beide telefoons moeten hetzelfde adres " +
-                "en dezelfde sleutel gebruiken.",
+            "Vul de huissleutel in en je naam. Beide telefoons gebruiken " +
+                "dezelfde sleutel.",
             style = MaterialTheme.typography.bodyMedium,
-        )
-
-        OutlinedTextField(
-            value = baseUrl,
-            onValueChange = { baseUrl = it },
-            label = { Text("Server-adres") },
-            supportingText = { Text("Tailscale-adres van de PC - werkt thuis en in de winkel") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            modifier = Modifier.fillMaxWidth(),
         )
 
         OutlinedTextField(
             value = householdKey,
             onValueChange = { householdKey = it },
             label = { Text("Huissleutel") },
-            supportingText = { Text("De HOUSEHOLD_KEY uit server/.env") },
+            supportingText = { Text("Dezelfde op beide telefoons") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -77,6 +70,20 @@ fun SetupScreen(vm: AppViewModel, canCancel: Boolean, onDone: () -> Unit) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        if (showAdvanced) {
+            OutlinedTextField(
+                value = baseUrl,
+                onValueChange = { baseUrl = it },
+                label = { Text("Server-adres") },
+                supportingText = { Text("Alleen wijzigen als de server verhuisd is") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            TextButton(onClick = { showAdvanced = true }) { Text("Geavanceerd") }
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(

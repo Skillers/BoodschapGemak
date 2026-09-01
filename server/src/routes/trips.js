@@ -105,8 +105,13 @@ tripsRouter.post('/current/close', async (_req, res) => {
     [trip.id]
   );
 
+  // Finishing the shop also sweeps what is already in the cart, so the next
+  // trip starts on a clean list. The app has no separate sweep button.
+  const swept = await query('DELETE FROM shopping_item WHERE is_checked = 1');
+
   broadcast('trip.changed');
-  res.json({ ok: true, closedTripId: trip.id });
+  broadcast('items.reload');
+  res.json({ ok: true, closedTripId: trip.id, clearedItems: swept.affectedRows });
 });
 
 /** Renames the open trip, e.g. "Weekend AH" instead of the date. */
