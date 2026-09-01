@@ -12,7 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Undo
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -98,7 +98,7 @@ fun TotalScreen(vm: AppViewModel) {
                 },
                 trailingContent = {
                     IconButton(onClick = { vm.deleteEntry(entry) }) {
-                        Icon(Icons.Outlined.Undo, contentDescription = "Ongedaan maken")
+                        Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = "Ongedaan maken")
                     }
                 },
             )
