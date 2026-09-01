@@ -30,7 +30,7 @@ import nl.boodschapgemak.data.AppViewModel
  */
 @Composable
 fun SetupScreen(vm: AppViewModel, canCancel: Boolean, onDone: () -> Unit) {
-    var baseUrl by remember { mutableStateOf(vm.settings.baseUrl.ifEmpty { "http://192.168.1.10:4000" }) }
+    var baseUrl by remember { mutableStateOf(vm.settings.baseUrl.ifEmpty { "http://100.109.218.100:4000" }) }
     var householdKey by remember { mutableStateOf(vm.settings.householdKey) }
     var userName by remember { mutableStateOf(vm.settings.userName) }
 
@@ -54,7 +54,7 @@ fun SetupScreen(vm: AppViewModel, canCancel: Boolean, onDone: () -> Unit) {
             value = baseUrl,
             onValueChange = { baseUrl = it },
             label = { Text("Server-adres") },
-            supportingText = { Text("Bijvoorbeeld http://192.168.1.10:4000") },
+            supportingText = { Text("Tailscale-adres van de PC - werkt thuis en in de winkel") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             modifier = Modifier.fillMaxWidth(),
