@@ -1,0 +1,5 @@
+# gradlew is a shell script: it must keep LF endings or it breaks when run
+# from Git Bash or on Linux/macOS. gradlew.bat is the opposite.
+gradlew            text eol=lf
+gradlew.bat        text eol=crlf
+*.jar              binary
