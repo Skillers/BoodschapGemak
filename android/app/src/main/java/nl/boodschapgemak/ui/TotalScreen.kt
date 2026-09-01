@@ -86,7 +86,7 @@ fun TotalScreen(vm: AppViewModel) {
             }
         }
 
-        items(current.entries, key = { it.id }) { entry ->
+        items(current.entries, key = { "entry-" + it.id }) { entry ->
             ListItem(
                 headlineContent = { Text(formatMoney(entry.amountCents)) },
                 supportingContent = {
@@ -114,7 +114,7 @@ fun TotalScreen(vm: AppViewModel) {
                     modifier = Modifier.padding(16.dp),
                 )
             }
-            items(closed, key = { it.id }) { past ->
+            items(closed, key = { "trip-" + it.id }) { past ->
                 ListItem(
                     headlineContent = { Text(past.label) },
                     supportingContent = { Text(past.entryCount.toString() + " keer bijgeteld") },
