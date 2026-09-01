@@ -12,10 +12,10 @@ USE boodschapgemak;
 -- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS shopping_item (
   id          INT AUTO_INCREMENT PRIMARY KEY,
+  -- A gerecht is just a row other rows point at. One level deep only.
+  parent_id   INT           NULL,
   name        VARCHAR(200)  NOT NULL,
   quantity    VARCHAR(60)   NULL,
-  -- Which dish this was added for, so the list says why it is there.
-  dish        VARCHAR(120)  NULL,
   is_checked  TINYINT(1)    NOT NULL DEFAULT 0,
   added_by    VARCHAR(50)   NOT NULL DEFAULT '',
   checked_by  VARCHAR(50)   NULL,
@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS shopping_item (
   created_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
                             ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_shopping_item_parent
+    FOREIGN KEY (parent_id) REFERENCES shopping_item(id) ON DELETE CASCADE,
+  INDEX idx_shopping_item_parent (parent_id, sort_order),
   INDEX idx_shopping_item_checked (is_checked, sort_order)
 ) ENGINE=InnoDB;
 

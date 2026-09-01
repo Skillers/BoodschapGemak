@@ -75,9 +75,9 @@ class Api(private val baseUrl: String, private val householdKey: String) {
         send(builder("/api/items/clear-checked").post(EMPTY_BODY).build())
     }
 
-    /** Adds every ingredient of a dish to the list in one request. */
-    fun addDish(dish: DishBody) {
-        send(builder("/api/items/dish").post(body(dish, DishBody.serializer())).build())
+    /** Writes a new order for one sibling group after a drag. */
+    fun reorder(ids: List<Int>) {
+        send(builder("/api/items/reorder").post(body(ReorderBody(ids), ReorderBody.serializer())).build())
     }
 
     // --- running total ----------------------------------------------------

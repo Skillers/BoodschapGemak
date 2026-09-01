@@ -1,55 +1,62 @@
 package nl.boodschapgemak.ui
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.outlined.DragIndicator
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import nl.boodschapgemak.data.AppViewModel
-import nl.boodschapgemak.data.DishIngredientBody
 import nl.boodschapgemak.data.ShoppingItem
 import nl.boodschapgemak.data.Trip
+import kotlin.math.roundToInt
+
+private fun keyOf(item: ShoppingItem) = "item-" + item.id
 
 @Composable
 fun ShoppingListScreen(vm: AppViewModel) {
@@ -57,41 +64,119 @@ fun ShoppingListScreen(vm: AppViewModel) {
     val trip by vm.trip.collectAsStateWithLifecycle()
     val me = vm.settings.userName
 
-    var editing by remember { mutableStateOf<ShoppingItem?>(null) }
-    var addingDish by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
 
-    val todo = items.filterNot { it.isChecked }
-    val done = items.filter { it.isChecked }
+    var renamingId by remember { mutableStateOf<Int?>(null) }
+    var addingChildFor by remember { mutableStateOf<Int?>(null) }
+
+    // Which row the finger is carrying, and how far it has moved.
+    var dragKey by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+
+    val childrenOf = items.filter { it.parentId != null }.groupBy { it.parentId }
+    val topLevel = items.filter { it.parentId == null }
+    val todo = topLevel.filterNot { it.isChecked }
+    val done = topLevel.filter { it.isChecked }
+
+    /** Works out where a dragged row was let go, and writes that order. */
+    fun commitDrag(siblings: List<ShoppingItem>) {
+        val key = dragKey ?: return
+        val info = listState.layoutInfo
+        val dragged = info.visibleItemsInfo.firstOrNull { it.key == key }
+        val movedId = siblings.firstOrNull { keyOf(it) == key }?.id
+        if (dragged == null || movedId == null || siblings.size < 2) return
+
+        val droppedCentre = dragged.offset + dragged.size / 2f + dragOffset
+        // How many siblings now sit above where the finger let go.
+        val target = siblings
+            .filter { it.id != movedId }
+            .count { sibling ->
+                val row = info.visibleItemsInfo.firstOrNull { it.key == keyOf(sibling) }
+                row != null && row.offset + row.size / 2f < droppedCentre
+            }
+
+        val order = siblings.map { it.id }.toMutableList()
+        val from = order.indexOf(movedId)
+        if (from == target) return
+        order.removeAt(from)
+        order.add(target.coerceIn(0, order.size), movedId)
+        vm.reorder(order)
+    }
 
     Column(Modifier.fillMaxSize()) {
         RunningTotal(trip = trip, onAdd = vm::addAmount)
-        AddItemRow(onAdd = vm::addItem)
-
-        Row(Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 4.dp)) {
-            TextButton(onClick = { addingDish = true }) {
-                Icon(Icons.Outlined.Add, contentDescription = null)
-                Text("Gerecht toevoegen", Modifier.padding(start = 8.dp))
-            }
-        }
+        AddItemRow(onAdd = { name -> vm.addItem(name) })
         HorizontalDivider()
 
         if (items.isEmpty()) {
             EmptyHint("De lijst is leeg. Typ hierboven wat er mee moet.")
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(todo, key = { "item-" + it.id }) { item ->
-                    ShoppingRow(
-                        item = item,
-                        me = me,
-                        onToggle = { vm.setChecked(item, true) },
-                        onClaim = { vm.toggleClaim(item) },
-                        onLongPress = { editing = item },
-                    )
-                    HorizontalDivider()
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+
+                fun block(parent: ShoppingItem, siblings: List<ShoppingItem>) {
+                    val kids = childrenOf[parent.id].orEmpty()
+
+                    item(key = keyOf(parent)) {
+                        ItemRow(
+                            item = parent,
+                            me = me,
+                            isSub = false,
+                            hasChildren = kids.isNotEmpty(),
+                            renaming = renamingId == parent.id,
+                            dragging = dragKey == keyOf(parent),
+                            dragOffset = dragOffset,
+                            onStartRename = { renamingId = parent.id },
+                            onRename = { vm.renameItem(parent, it); renamingId = null },
+                            onToggle = { vm.setChecked(parent, !parent.isChecked) },
+                            onClaim = { vm.toggleClaim(parent) },
+                            onDelete = { vm.deleteItem(parent) },
+                            onAddChild = { addingChildFor = parent.id },
+                            onDragStart = { dragKey = keyOf(parent); dragOffset = 0f },
+                            onDrag = { dragOffset += it },
+                            onDragEnd = { commitDrag(siblings); dragKey = null; dragOffset = 0f },
+                        )
+                        HorizontalDivider()
+                    }
+
+                    items(kids.size, key = { keyOf(kids[it]) }) { index ->
+                        val kid = kids[index]
+                        ItemRow(
+                            item = kid,
+                            me = me,
+                            isSub = true,
+                            hasChildren = false,
+                            renaming = renamingId == kid.id,
+                            dragging = dragKey == keyOf(kid),
+                            dragOffset = dragOffset,
+                            onStartRename = { renamingId = kid.id },
+                            onRename = { vm.renameItem(kid, it); renamingId = null },
+                            onToggle = { vm.setChecked(kid, !kid.isChecked) },
+                            onClaim = { vm.toggleClaim(kid) },
+                            onDelete = { vm.deleteItem(kid) },
+                            onAddChild = null,
+                            onDragStart = { dragKey = keyOf(kid); dragOffset = 0f },
+                            onDrag = { dragOffset += it },
+                            onDragEnd = { commitDrag(kids); dragKey = null; dragOffset = 0f },
+                        )
+                        HorizontalDivider()
+                    }
+
+                    if (addingChildFor == parent.id) {
+                        item(key = "add-child-" + parent.id) {
+                            NewSubItemRow(
+                                onDone = { name ->
+                                    if (name.isNotBlank()) vm.addItem(name, parentId = parent.id)
+                                    addingChildFor = null
+                                },
+                                onCancel = { addingChildFor = null },
+                            )
+                            HorizontalDivider()
+                        }
+                    }
                 }
 
-                // Ticked items sit down here in their own block, out of the way
-                // of what still has to be found. They leave when the trip closes.
+                todo.forEach { block(it, todo) }
+
                 if (done.isNotEmpty()) {
                     item(key = "done-header") {
                         Text(
@@ -104,51 +189,178 @@ fun ShoppingListScreen(vm: AppViewModel) {
                         )
                         HorizontalDivider()
                     }
-                    items(done, key = { "item-" + it.id }) { item ->
-                        ShoppingRow(
-                            item = item,
-                            me = me,
-                            onToggle = { vm.setChecked(item, false) },
-                            onClaim = { vm.toggleClaim(item) },
-                            onLongPress = { editing = item },
-                        )
-                        HorizontalDivider()
-                    }
+                    done.forEach { block(it, done) }
                 }
             }
         }
     }
+}
 
-    if (addingDish) {
-        DishDialog(
-            onDismiss = { addingDish = false },
-            onSave = { dish, ingredients ->
-                vm.addDish(dish, ingredients)
-                addingDish = false
-            },
-        )
+/**
+ * One row, whether it is a gerecht or something under one. Tap the name to
+ * rename it where it stands; drag the handle to move it among its own kind.
+ */
+@Composable
+private fun ItemRow(
+    item: ShoppingItem,
+    me: String,
+    isSub: Boolean,
+    hasChildren: Boolean,
+    renaming: Boolean,
+    dragging: Boolean,
+    dragOffset: Float,
+    onStartRename: () -> Unit,
+    onRename: (String) -> Unit,
+    onToggle: () -> Unit,
+    onClaim: () -> Unit,
+    onDelete: () -> Unit,
+    onAddChild: (() -> Unit)?,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+) {
+    val claimedBy = item.claimedBy?.takeIf { it.isNotBlank() && !item.isChecked }
+    val claimedByMe = claimedBy == me
+
+    val background = when {
+        dragging -> MaterialTheme.colorScheme.surfaceVariant
+        claimedBy == null -> Color.Transparent
+        claimedByMe -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.tertiaryContainer
     }
 
-    editing?.let { item ->
-        EditItemDialog(
-            item = item,
-            onDismiss = { editing = null },
-            onSave = { name, quantity ->
-                vm.editItem(item, name, quantity)
-                editing = null
-            },
-            onDelete = {
-                vm.deleteItem(item)
-                editing = null
-            },
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .zIndex(if (dragging) 1f else 0f)
+            .offset { IntOffset(0, if (dragging) dragOffset.roundToInt() else 0) }
+            .background(background)
+            .padding(start = if (isSub) 28.dp else 4.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.DragIndicator,
+            contentDescription = "Verslepen",
+            tint = MaterialTheme.colorScheme.outline,
+            modifier = Modifier
+                .size(24.dp)
+                .pointerInput(item.id) {
+                    detectDragGestures(
+                        onDragStart = { onDragStart() },
+                        onDrag = { change, amount -> change.consume(); onDrag(amount.y) },
+                        onDragEnd = { onDragEnd() },
+                        onDragCancel = { onDragEnd() },
+                    )
+                },
         )
+
+        Checkbox(checked = item.isChecked, onCheckedChange = { onToggle() })
+
+        if (renaming) {
+            val focus = remember { FocusRequester() }
+            var text by remember(item.id) { mutableStateOf(item.name) }
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onRename(text) }),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 4.dp)
+                    .focusRequester(focus),
+            )
+            LaunchedEffect(item.id) { focus.requestFocus() }
+            IconButton(onClick = { onRename(text) }) {
+                Icon(Icons.Outlined.Check, contentDescription = "Naam opslaan")
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Outlined.Delete,
+                    contentDescription = "Verwijderen",
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
+        } else {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .clickable(onClick = onStartRename)
+                    .padding(vertical = 10.dp),
+            ) {
+                Text(
+                    text = item.name,
+                    textDecoration = if (item.isChecked) TextDecoration.LineThrough else null,
+                    style = if (hasChildren) {
+                        MaterialTheme.typography.titleMedium
+                    } else {
+                        MaterialTheme.typography.bodyLarge
+                    },
+                )
+                val note = listOfNotNull(
+                    item.quantity?.takeIf { it.isNotBlank() },
+                    when {
+                        item.isChecked -> item.checkedBy?.takeIf { it.isNotBlank() }?.let { "in de kar door $it" }
+                        claimedByMe -> "jij loopt ernaartoe"
+                        claimedBy != null -> "$claimedBy loopt ernaartoe"
+                        else -> null
+                    },
+                ).joinToString(" - ")
+                if (note.isNotEmpty()) {
+                    Text(
+                        note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+
+            // A gerecht is not something you walk to a shelf for, so it gets
+            // the add button instead of a claim.
+            if (!item.isChecked && !hasChildren) {
+                ClaimChip(claimedBy = claimedBy, claimedByMe = claimedByMe, onClick = onClaim)
+            }
+            if (onAddChild != null) {
+                IconButton(onClick = onAddChild) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Onderdeel toevoegen")
+                }
+            }
+        }
     }
+}
+
+/** The inline field that appears under a gerecht when you tap its plus. */
+@Composable
+private fun NewSubItemRow(onDone: (String) -> Unit, onCancel: () -> Unit) {
+    val focus = remember { FocusRequester() }
+    var text by remember { mutableStateOf("") }
+
+    Row(
+        Modifier.fillMaxWidth().padding(start = 52.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text("Onderdeel") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onDone(text) }),
+            modifier = Modifier.weight(1f).focusRequester(focus),
+        )
+        IconButton(onClick = { onDone(text) }) {
+            Icon(Icons.Outlined.Check, contentDescription = "Toevoegen")
+        }
+        IconButton(onClick = onCancel) {
+            Icon(Icons.Outlined.Delete, contentDescription = "Annuleren")
+        }
+    }
+    LaunchedEffect(Unit) { focus.requestFocus() }
 }
 
 /**
  * What this shop has cost so far, and the one field that changes it. Type an
- * amount, tap +, the number climbs. Deliberately not tied to list items - you
- * are copying what the shelf label said, not itemising a receipt.
+ * amount, tap +, the number climbs.
  */
 @Composable
 private fun RunningTotal(trip: Trip?, onAdd: (Int, String) -> Unit) {
@@ -200,184 +412,33 @@ private fun RunningTotal(trip: Trip?, onAdd: (Int, String) -> Unit) {
 }
 
 @Composable
-private fun AddItemRow(onAdd: (String, String) -> Unit) {
+private fun AddItemRow(onAdd: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
-    var quantity by remember { mutableStateOf("") }
 
     fun submit() {
         if (name.isBlank()) return
-        onAdd(name, quantity)
+        onAdd(name)
         name = ""
-        quantity = ""
     }
 
     Row(
-        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp),
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
-            label = { Text("Product") },
+            label = { Text("Product of gerecht") },
             singleLine = true,
-            modifier = Modifier.weight(2f),
-        )
-        OutlinedTextField(
-            value = quantity,
-            onValueChange = { quantity = it },
-            label = { Text("Aantal") },
-            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { submit() }),
             modifier = Modifier.weight(1f),
         )
         FilledIconButton(onClick = ::submit, enabled = name.isNotBlank()) {
             Icon(Icons.Outlined.Add, contentDescription = "Toevoegen")
         }
     }
-}
-
-/**
- * Name a dish and list what it needs. Every line lands on the shopping list as
- * an ordinary row carrying the dish name, so mid-shop you can see that the
- * pesto is there for the pasta and not on its own account.
- */
-@Composable
-private fun DishDialog(onDismiss: () -> Unit, onSave: (String, List<DishIngredientBody>) -> Unit) {
-    var dish by remember { mutableStateOf("") }
-    var lines by remember { mutableStateOf(listOf("" to "")) }
-
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize()) {
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("Gerecht toevoegen", style = MaterialTheme.typography.headlineSmall)
-
-                OutlinedTextField(
-                    value = dish,
-                    onValueChange = { dish = it },
-                    label = { Text("Gerecht") },
-                    supportingText = { Text("Bijvoorbeeld: pasta pesto") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                Text("Ingredienten", style = MaterialTheme.typography.titleMedium)
-
-                lines.forEachIndexed { index, line ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        OutlinedTextField(
-                            value = line.first,
-                            onValueChange = { newName ->
-                                lines = lines.toMutableList().also { it[index] = newName to line.second }
-                            },
-                            label = { Text("Ingredient") },
-                            singleLine = true,
-                            modifier = Modifier.weight(2f),
-                        )
-                        OutlinedTextField(
-                            value = line.second,
-                            onValueChange = { newAmount ->
-                                lines = lines.toMutableList().also { it[index] = line.first to newAmount }
-                            },
-                            label = { Text("Aantal") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = { lines = lines.filterIndexed { i, _ -> i != index } },
-                            enabled = lines.size > 1,
-                        ) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "Regel verwijderen")
-                        }
-                    }
-                }
-
-                TextButton(onClick = { lines = lines + ("" to "") }) {
-                    Icon(Icons.Outlined.Add, contentDescription = null)
-                    Text("Regel toevoegen", Modifier.padding(start = 8.dp))
-                }
-
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onDismiss) { Text("Annuleren") }
-                    Button(
-                        enabled = dish.isNotBlank() && lines.any { it.first.isNotBlank() },
-                        onClick = {
-                            val ingredients = lines
-                                .filter { it.first.isNotBlank() }
-                                .map { DishIngredientBody(it.first.trim(), it.second.trim().ifEmpty { null }) }
-                            onSave(dish, ingredients)
-                        },
-                    ) { Text("Op de lijst zetten") }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Tap the row to tick something into the cart, tap the chip to say you are on
- * your way to it. The claim is the part that stops you both walking to the
- * same shelf, so it gets the colour.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ShoppingRow(
-    item: ShoppingItem,
-    me: String,
-    onToggle: () -> Unit,
-    onClaim: () -> Unit,
-    onLongPress: () -> Unit,
-) {
-    val claimedBy = item.claimedBy?.takeIf { it.isNotBlank() && !item.isChecked }
-    val claimedByMe = claimedBy == me
-
-    val container = when {
-        claimedBy == null -> ListItemDefaults.containerColor
-        claimedByMe -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.tertiaryContainer
-    }
-
-    ListItem(
-        modifier = Modifier.combinedClickable(onClick = onToggle, onLongClick = onLongPress),
-        colors = ListItemDefaults.colors(containerColor = container),
-        leadingContent = {
-            Checkbox(checked = item.isChecked, onCheckedChange = { onToggle() })
-        },
-        headlineContent = {
-            Text(
-                text = item.name,
-                textDecoration = if (item.isChecked) TextDecoration.LineThrough else null,
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        },
-        supportingContent = {
-            val note = listOfNotNull(
-                item.quantity?.takeIf { it.isNotBlank() },
-                item.dish?.takeIf { it.isNotBlank() }?.let { "voor $it" },
-                when {
-                    item.isChecked -> item.checkedBy?.takeIf { it.isNotBlank() }?.let { "in de kar door $it" }
-                    claimedByMe -> "jij loopt ernaartoe"
-                    claimedBy != null -> "$claimedBy loopt ernaartoe"
-                    else -> null
-                },
-            ).joinToString(" - ")
-            if (note.isNotEmpty()) Text(note)
-        },
-        trailingContent = {
-            if (!item.isChecked) {
-                ClaimChip(claimedBy = claimedBy, claimedByMe = claimedByMe, onClick = onClaim)
-            }
-        },
-    )
 }
 
 @Composable
@@ -406,54 +467,6 @@ private fun ClaimChip(claimedBy: String?, claimedByMe: Boolean, onClick: () -> U
                     MaterialTheme.colorScheme.onTertiary
                 },
             )
-        },
-    )
-}
-
-@Composable
-private fun EditItemDialog(
-    item: ShoppingItem,
-    onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit,
-    onDelete: () -> Unit,
-) {
-    var name by remember { mutableStateOf(item.name) }
-    var quantity by remember { mutableStateOf(item.quantity.orEmpty()) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Product aanpassen") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Product") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = quantity,
-                    onValueChange = { quantity = it },
-                    label = { Text("Aantal") },
-                    singleLine = true,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = name.isNotBlank(), onClick = { onSave(name, quantity) }) {
-                Text("Opslaan")
-            }
-        },
-        dismissButton = {
-            Row {
-                TextButton(
-                    onClick = onDelete,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-                ) { Text("Verwijderen") }
-                TextButton(onClick = onDismiss) { Text("Annuleren") }
-            }
         },
     )
 }

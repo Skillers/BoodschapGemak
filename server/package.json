@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:gerechten": "node scripts/smoke-gerechten.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -139,9 +139,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- local list bookkeeping -------------------------------------------
 
-    /** Same order the server uses: unticked first, then by position. */
+    /**
+     * Same order the server uses. Ticked rows are no longer sunk here - the
+     * screen groups them, because a ticked gerecht has to keep its sub-items
+     * with it rather than scatter them.
+     */
     private fun List<ShoppingItem>.inListOrder() =
-        sortedWith(compareBy({ it.isChecked }, { it.sortOrder }, { it.id }))
+        sortedWith(compareBy({ it.sortOrder }, { it.id }))
 
     private fun applyItem(item: ShoppingItem) {
         items.value = (items.value.filterNot { it.id == item.id } + item).inListOrder()
@@ -185,20 +189,42 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- shopping list ----------------------------------------------------
 
-    fun addItem(name: String, quantity: String) = call {
+    /** [parentId] puts the new row inside that gerecht instead of at top level. */
+    fun addItem(name: String, quantity: String = "", parentId: Int? = null) = call {
         // No local id to invent, so this one waits for the server. Adding is
         // not the part you do while racing each other down an aisle.
-        applyItem(it.addItem(NewItemBody(name.trim(), quantity.trim().ifEmpty { null }, settings.userName)))
-    }
-
-    fun setChecked(item: ShoppingItem, checked: Boolean) {
         applyItem(
-            item.copy(
-                isChecked = checked,
-                checkedBy = if (checked) settings.userName else null,
-                claimedBy = null,
+            it.addItem(
+                NewItemBody(name.trim(), quantity.trim().ifEmpty { null }, settings.userName, parentId)
             )
         )
+    }
+
+    /** Renames a row in place. Ignores a blank or unchanged name. */
+    fun renameItem(item: ShoppingItem, name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || trimmed == item.name) return
+        applyItem(item.copy(name = trimmed))
+        call(onFailure = { refreshItems() }) {
+            it.patchItem(item.id, ItemPatchBody(name = trimmed))
+        }
+    }
+
+    /** Commits a drag: the ids of one sibling group in their new order. */
+    fun reorder(ids: List<Int>) = call(onFailure = { refreshItems() }) { it.reorder(ids) }
+
+    fun setChecked(item: ShoppingItem, checked: Boolean) {
+        val by = if (checked) settings.userName else null
+        // Ticking a gerecht ticks everything under it. Applied locally too, so
+        // the screen does not wait for the server to say the same thing.
+        items.value = items.value.map {
+            if (it.id == item.id || it.parentId == item.id) {
+                it.copy(isChecked = checked, checkedBy = by, claimedBy = null)
+            } else {
+                it
+            }
+        }.inListOrder()
+
         call(onFailure = { refreshItems() }) {
             it.patchItem(item.id, ItemPatchBody(isChecked = checked, by = settings.userName))
         }
@@ -230,14 +256,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         items.value = it.getItems()
     }
 
-    /**
-     * Puts a whole dish on the list. Every ingredient becomes an ordinary row
-     * carrying the dish name, so the list says why each thing is on it.
-     */
-    fun addDish(dish: String, ingredients: List<DishIngredientBody>) = call {
-        it.addDish(DishBody(dish.trim(), settings.userName, ingredients))
-        items.value = it.getItems()
-    }
 
     // --- running total ----------------------------------------------------
 

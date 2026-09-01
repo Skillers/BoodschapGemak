@@ -5,10 +5,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ShoppingItem(
     val id: Int,
+    /** Set on a sub-item, pointing at the gerecht it belongs to. */
+    val parentId: Int? = null,
     val name: String,
     val quantity: String? = null,
-    /** The dish this was added for, if it came from one. */
-    val dish: String? = null,
     val isChecked: Boolean = false,
     val addedBy: String = "",
     val checkedBy: String? = null,
@@ -70,19 +70,27 @@ data class Recipe(
 // and the server leaves that column alone. To *clear* a text column, send "".
 
 @Serializable
-data class NewItemBody(val name: String, val quantity: String? = null, val addedBy: String = "")
+data class NewItemBody(
+    val name: String,
+    val quantity: String? = null,
+    val addedBy: String = "",
+    /** Set to put this item inside a gerecht. */
+    val parentId: Int? = null,
+)
 
 @Serializable
 data class ItemPatchBody(
     val name: String? = null,
     val quantity: String? = null,
-    /** The dish this was added for, if it came from one. */
-    val dish: String? = null,
     val isChecked: Boolean? = null,
     val by: String? = null,
     /** A name takes the claim, "" releases it. */
     val claimedBy: String? = null,
 )
+
+/** The ids of one sibling group, in the order they now appear on screen. */
+@Serializable
+data class ReorderBody(val ids: List<Int>)
 
 @Serializable
 data class NewEntryBody(val amountCents: Int, val note: String? = null, val addedBy: String = "")
@@ -99,16 +107,4 @@ data class RecipeBody(
     val notes: String? = null,
     val plannedFor: String? = null,
     val ingredients: List<IngredientBody> = emptyList(),
-)
-
-// --- adding a whole dish at once ------------------------------------------
-
-@Serializable
-data class DishIngredientBody(val name: String, val quantity: String? = null)
-
-@Serializable
-data class DishBody(
-    val dish: String,
-    val addedBy: String = "",
-    val ingredients: List<DishIngredientBody> = emptyList(),
 )
