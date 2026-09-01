@@ -30,7 +30,7 @@ import nl.boodschapgemak.data.AppViewModel
  */
 @Composable
 fun SetupScreen(vm: AppViewModel, canCancel: Boolean, onDone: () -> Unit) {
-    var baseUrl by remember { mutableStateOf(vm.settings.baseUrl.ifEmpty { "http://100.109.218.100:4000" }) }
+    var baseUrl by remember { mutableStateOf(vm.settings.baseUrl.ifEmpty { "http://desktop-ctplf50:4000" }) }
     var householdKey by remember { mutableStateOf(vm.settings.householdKey) }
     var userName by remember { mutableStateOf(vm.settings.userName) }
 
