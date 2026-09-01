@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>BoodschapGemak — testclient</title>
+<style>
+  :root {
+    --bg: #F7FBF2; --card: #fff; --ink: #12211A; --soft: #5A6C5F;
+    --line: #DCE5DE; --mine: #2E6B34; --theirs: #39656B; --warn: #A9701A;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10140F; --card: #1A211A; --ink: #E4EDE7; --soft: #A0B0A4;
+      --line: #2B352C; --mine: #99D498; --theirs: #A1CED4; --warn: #E0A94A;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+    padding: 1rem; max-width: 34rem; margin-inline: auto;
+  }
+  h1 { font-size: 1.1rem; margin: 0; }
+  header { display: flex; align-items: center; gap: .6rem; margin-bottom: .25rem; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #999; flex: none; }
+  .dot.live { background: #3DDC84; } .dot.connecting { background: var(--warn); }
+  .meta { font-size: .78rem; color: var(--soft); margin-bottom: 1rem; }
+  .meta b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  fieldset { border: 1px solid var(--line); border-radius: 8px; padding: .8rem; margin: 0 0 1rem; }
+  legend { font-size: .75rem; color: var(--soft); padding: 0 .4rem; }
+  label { display: block; font-size: .78rem; color: var(--soft); margin-bottom: .15rem; }
+  input {
+    width: 100%; padding: .55rem .65rem; font: inherit; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .fields { display: flex; flex-direction: column; gap: .6rem; }
+  .row2 { display: flex; gap: .5rem; } .row2 > * { flex: 1; }
+  button {
+    font: inherit; padding: .55rem .9rem; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  }
+  button.primary { background: var(--mine); color: var(--bg); border-color: var(--mine); }
+  button:disabled { opacity: .5; cursor: default; }
+
+  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .4rem; }
+  li {
+    display: flex; align-items: center; gap: .7rem; padding: .65rem .8rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  }
+  li.claimed-mine { border-color: var(--mine); }
+  li.claimed-theirs { border-color: var(--theirs); }
+  li.done .name { text-decoration: line-through; color: var(--soft); }
+  input[type=checkbox] { width: 22px; height: 22px; flex: none; accent-color: var(--mine); }
+  .grow { flex: 1; min-width: 0; }
+  .name { display: block; }
+  .sub { font-size: .74rem; color: var(--soft); }
+  .chip {
+    font-size: .74rem; padding: .3rem .6rem; border-radius: 999px; white-space: nowrap;
+    border: 1px solid var(--line); background: transparent; color: var(--soft); cursor: pointer;
+  }
+  .chip.mine { background: var(--mine); color: var(--bg); border-color: var(--mine); }
+  .chip.theirs { background: var(--theirs); color: var(--bg); border-color: var(--theirs); }
+  .empty, .error { color: var(--soft); font-size: .9rem; padding: .5rem 0; }
+  .error { color: var(--warn); }
+  .actions { display: flex; gap: .5rem; margin: .8rem 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>BoodschapGemak testclient</h1>
+</header>
+<div class="meta" id="meta">Niet verbonden.</div>
+
+<fieldset id="setup">
+  <legend>Instellingen</legend>
+  <div class="fields">
+    <div>
+      <label for="key">Huissleutel (HOUSEHOLD_KEY uit .env)</label>
+      <input id="key" type="password" autocomplete="off" />
+    </div>
+    <div>
+      <label for="name">Jouw naam</label>
+      <input id="name" autocomplete="off" placeholder="Rick" />
+    </div>
+    <div><button class="primary" id="connect">Verbinden</button></div>
+  </div>
+</fieldset>
+
+<div id="app" hidden>
+  <fieldset>
+    <legend>Toevoegen</legend>
+    <div class="row2">
+      <input id="newName" placeholder="Product" />
+      <input id="newQty" placeholder="Aantal" />
+      <button class="primary" id="add">+</button>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <button id="clear">Verwijder afgevinkte</button>
+    <button id="ping">Meet round trip</button>
+  </div>
+
+  <div class="error" id="error" hidden></div>
+  <ul id="list"></ul>
+  <p class="empty" id="empty" hidden>De lijst is leeg.</p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const store = window.localStorage;
+
+  let key = store.getItem("bg.key") || "";
+  let me = store.getItem("bg.name") || "";
+  let items = [];
+  let socket = null;
+  let retry = 0;
+  let lastRtt = null;
+  let lastPush = null;
+
+  $("key").value = key;
+  $("name").value = me;
+
+  // ---- helpers ----------------------------------------------------------
+
+  const headers = () => ({ "content-type": "application/json", "x-household-key": key });
+
+  async function api(path, options = {}) {
+    const started = performance.now();
+    const res = await fetch("/api" + path, { ...options, headers: headers() });
+    lastRtt = Math.round(performance.now() - started);
+    if (!res.ok) throw new Error("HTTP " + res.status + " " + (await res.text()));
+    renderMeta();
+    return res.status === 204 ? null : res.json();
+  }
+
+  function showError(err) {
+    const box = $("error");
+    box.hidden = !err;
+    box.textContent = err ? String(err.message || err) : "";
+  }
+
+  function setStatus(state) {
+    $("dot").className = "dot " + state;
+    renderMeta(state);
+  }
+
+  let statusState = "";
+  function renderMeta(state) {
+    if (state) statusState = state;
+    const bits = [];
+    bits.push(statusState === "live" ? "Live verbonden" : statusState === "connecting" ? "Verbinden…" : "Offline");
+    if (lastRtt !== null) bits.push("round trip <b>" + lastRtt + " ms</b>");
+    if (lastPush !== null) bits.push("laatste push <b>" + lastPush + "</b>");
+    $("meta").innerHTML = bits.join(" &middot; ");
+  }
+
+  // ---- rendering --------------------------------------------------------
+
+  const order = (a, b) =>
+    (a.isChecked - b.isChecked) || (a.sortOrder - b.sortOrder) || (a.id - b.id);
+
+  function upsert(item) {
+    items = items.filter((i) => i.id !== item.id).concat(item).sort(order);
+    render();
+  }
+
+  function render() {
+    const list = $("list");
+    list.textContent = "";
+    $("empty").hidden = items.length > 0;
+
+    for (const item of items) {
+      const claimed = !item.isChecked && item.claimedBy ? item.claimedBy : null;
+      const mine = claimed === me;
+
+      const li = document.createElement("li");
+      li.className = [
+        item.isChecked ? "done" : "",
+        claimed ? (mine ? "claimed-mine" : "claimed-theirs") : "",
+      ].join(" ").trim();
+
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = item.isChecked;
+      box.addEventListener("change", () => setChecked(item, box.checked));
+
+      const grow = document.createElement("div");
+      grow.className = "grow";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = item.name;
+      grow.appendChild(name);
+
+      const notes = [
+        item.quantity || "",
+        item.isChecked && item.checkedBy ? "in de kar door " + item.checkedBy : "",
+        claimed ? (mine ? "jij loopt ernaartoe" : claimed + " loopt ernaartoe") : "",
+      ].filter(Boolean).join(" · ");
+      if (notes) {
+        const sub = document.createElement("span");
+        sub.className = "sub";
+        sub.textContent = notes;
+        grow.appendChild(sub);
+      }
+
+      li.append(box, grow);
+
+      if (!item.isChecked) {
+        const chip = document.createElement("button");
+        chip.className = "chip " + (claimed ? (mine ? "mine" : "theirs") : "");
+        chip.textContent = claimed ? (mine ? "Jij" : claimed) : "Pak ik";
+        chip.addEventListener("click", () => toggleClaim(item));
+        li.appendChild(chip);
+      }
+
+      const del = document.createElement("button");
+      del.className = "chip";
+      del.textContent = "×";
+      del.addEventListener("click", () => remove(item));
+      li.appendChild(del);
+
+      list.appendChild(li);
+    }
+  }
+
+  // ---- actions (applied locally first, exactly like the app) -------------
+
+  function setChecked(item, checked) {
+    upsert({ ...item, isChecked: checked, checkedBy: checked ? me : null, claimedBy: null });
+    api("/items/" + item.id, {
+      method: "PATCH",
+      body: JSON.stringify({ isChecked: checked, by: me }),
+    }).catch((e) => { showError(e); load(); });
+  }
+
+  function toggleClaim(item) {
+    const claim = item.claimedBy === me ? null : me;
+    upsert({ ...item, claimedBy: claim });
+    api("/items/" + item.id, {
+      method: "PATCH",
+      body: JSON.stringify({ claimedBy: claim || "" }),
+    }).catch((e) => { showError(e); load(); });
+  }
+
+  function remove(item) {
+    items = items.filter((i) => i.id !== item.id);
+    render();
+    api("/items/" + item.id, { method: "DELETE" }).catch((e) => { showError(e); load(); });
+  }
+
+  async function load() {
+    try {
+      items = (await api("/items")).sort(order);
+      render();
+      showError(null);
+    } catch (e) {
+      showError(e);
+    }
+  }
+
+  // ---- live socket ------------------------------------------------------
+
+  function openSocket() {
+    setStatus("connecting");
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    socket = new WebSocket(scheme + "://" + location.host + "/live?key=" + encodeURIComponent(key));
+
+    socket.addEventListener("open", () => { retry = 0; setStatus("live"); load(); });
+
+    socket.addEventListener("message", (event) => {
+      const msg = JSON.parse(event.data);
+      lastPush = msg.type;
+      renderMeta();
+      if (msg.type === "item.upserted") upsert(msg.item);
+      else if (msg.type === "item.deleted") { items = items.filter((i) => i.id !== msg.id); render(); }
+      else if (msg.type === "items.reload") load();
+    });
+
+    const reconnect = () => {
+      setStatus("offline");
+      const wait = Math.min(15000, 1000 * 2 ** Math.min(retry++, 4));
+      setTimeout(openSocket, wait);
+    };
+    socket.addEventListener("close", reconnect);
+    socket.addEventListener("error", () => socket.close());
+  }
+
+  // ---- wiring -----------------------------------------------------------
+
+  $("connect").addEventListener("click", () => {
+    key = $("key").value.trim();
+    me = $("name").value.trim();
+    if (!key || !me) return;
+    store.setItem("bg.key", key);
+    store.setItem("bg.name", me);
+    $("setup").hidden = true;
+    $("app").hidden = false;
+    openSocket();
+  });
+
+  $("add").addEventListener("click", async () => {
+    const name = $("newName").value.trim();
+    if (!name) return;
+    const quantity = $("newQty").value.trim();
+    $("newName").value = "";
+    $("newQty").value = "";
+    try {
+      upsert(await api("/items", {
+        method: "POST",
+        body: JSON.stringify({ name, quantity: quantity || null, addedBy: me }),
+      }));
+      showError(null);
+    } catch (e) { showError(e); }
+  });
+
+  $("newName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("add").click(); });
+  $("newQty").addEventListener("keydown", (e) => { if (e.key === "Enter") $("add").click(); });
+
+  $("clear").addEventListener("click", async () => {
+    try { await api("/items/clear-checked", { method: "POST" }); await load(); }
+    catch (e) { showError(e); }
+  });
+
+  $("ping").addEventListener("click", async () => {
+    try { await api("/items"); } catch (e) { showError(e); }
+  });
+
+  if (key && me) $("connect").click();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The API server runs on your own machine over plain http, so cleartext has
+  to be allowed. Once you put the server behind https, delete this file and
+  the android:networkSecurityConfig line in AndroidManifest.xml.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
